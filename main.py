@@ -1,6 +1,9 @@
 from flask import Flask, request, jsonify
+import requests
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
+api_key = "1dd230835dcb4d4ab8f64234253107" 
 
 @app.route('/', methods=['GET'])
 def home():
@@ -8,10 +11,49 @@ def home():
 
 @app.route('/api/check_weather', methods=['GET'])
 def check_weather():
+
+    date_str = request.args.get('date')
+    city = request.args.get('city')
+
+    requested_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    today = datetime.today().date()
+    max_future_date = today + timedelta(days=10)
+    max_past_date = today - timedelta(days=7)  # adjust based on your plan
+
+    if requested_date > max_future_date:
+        return jsonify({
+        "status": "error",
+        "text": "Forecast is only available for up to 10 days from today."
+        }), 200
+
+    if requested_date < max_past_date:
+        return jsonify({
+            "status": "error",
+            "text": "Historical data is only available for the past 7 days."
+        }), 200
+
+    if requested_date < today:
+        endpoint = 'history.json'
+    else:
+        endpoint = 'forecast.json'
+
+    url = f'https://api.weatherapi.com/v1/{endpoint}?key={api_key}&q={city}&dt={date_str}'
+
+    response = requests.get(url)
+    data = response.json()
+    day_data = data['forecast']['forecastday'][0]['day']
+    
+    max_temp = day_data['maxtemp_c']
+    min_temp = day_data['mintemp_c']
+    avg_temp = day_data['avgtemp_c']
+
     weather_data = {
-        "status": "success",
-        "text" : "It is sunny today"
-    }
+            "status": "success",
+            "text": (
+                f"The weather in {city} on {date_str} had a max temp of {max_temp}°C, "
+                f"min temp of {min_temp}°C, and an average of {avg_temp}°C."
+            )
+        }
     return jsonify(weather_data), 200
 
 @app.route('/api/history', methods=['GET'])
