@@ -20,6 +20,11 @@ conn = psycopg2.connect(
 )
 cursor = conn.cursor()
 
+# Is user authorized
+def is_user_authorized(username):
+    cursor.execute("SELECT * FROM telegram_users WHERE username = %s", (username,))
+    return cursor.fetchone() is not None
+
 # Get messages from telegram bot
 def get_updates(offset=None):
     url = f'{BASE_URL}/getUpdates'
@@ -107,6 +112,13 @@ def main():
             text = message.get('text', '')
             user_id = message['from'].get('id')
             parts = text.strip().split()
+            username = message['from'].get('username', 'unknown')
+
+            # Check if user is authorized
+            if not is_user_authorized(username):
+                send_message(chat_id, "You are not authorized to use this bot.")
+                offset = update['update_id'] + 1
+                continue
 
             if not parts:
                 send_message(chat_id, "Empty message received.")
