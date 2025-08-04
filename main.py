@@ -1,92 +1,164 @@
-from flask import Flask, request, jsonify
 import requests
+import time
+import psycopg2
 from datetime import datetime, timedelta
 
-app = Flask(__name__)
-api_key = "1dd230835dcb4d4ab8f64234253107" 
+# Bot configuration
+TOKEN = ''  # Bot Token
+BASE_URL = f'https://api.telegram.org/bot{TOKEN}'
 
-@app.route('/', methods=['GET'])
-def home():
-    return "API is running!"
+# Weather API Key
+WEATHER_API_KEY = ''
 
-@app.route('/api/check_weather', methods=['GET'])
-def check_weather():
+# PostgreSQL setup
+conn = psycopg2.connect(
+    dbname='test',
+    user='root',
+    password='root',
+    host='localhost',
+    port=5432
+)
+cursor = conn.cursor()
 
-    date_str = request.args.get('date')
-    city = request.args.get('city')
+# Get messages from telegram bot
+def get_updates(offset=None):
+    url = f'{BASE_URL}/getUpdates'
+    params = {'timeout': 100, 'offset': offset}
+    response = requests.get(url, params=params)
+    return response.json()
 
-    requested_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+# Send messages to bot
+def send_message(chat_id, text):
+    url = f'{BASE_URL}/sendMessage'
+    data = {'chat_id': chat_id, 'text': text}
+    requests.post(url, data=data)
+
+# Get the weather for a specific city at a specific time
+def check_weather_logic(city, date_str):
+    try:
+        requested_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return "Invalid date format. Please use YYYY-MM-DD."
+
     today = datetime.today().date()
-    max_future_date = today + timedelta(days=10)
-    max_past_date = today - timedelta(days=7)  # adjust based on your plan
+    if requested_date > today + timedelta(days=10):
+        return "Forecast is only available for up to 10 days from today."
+    if requested_date < today - timedelta(days=10):
+        return "Historical data is only available for the past 10 days."
 
-    if requested_date > max_future_date:
-        return jsonify({
-        "status": "error",
-        "text": "Forecast is only available for up to 10 days from today."
-        }), 200
+    endpoint = 'history.json' if requested_date < today else 'forecast.json'
+    url = f'https://api.weatherapi.com/v1/{endpoint}?key={WEATHER_API_KEY}&q={city}&dt={date_str}'
 
-    if requested_date < max_past_date:
-        return jsonify({
-            "status": "error",
-            "text": "Historical data is only available for the past 7 days."
-        }), 200
+    try:
+        response = requests.get(url)
+        data = response.json()
+        day_data = data['forecast']['forecastday'][0]['day']
+        return (
+            f"The weather in {city} on {date_str} had a max temp of {day_data['maxtemp_c']}°C, "
+            f"min temp of {day_data['mintemp_c']}°C, and an average of {day_data['avgtemp_c']}°C."
+        )
+    except Exception:
+        return "Failed to retrieve weather data."
 
-    if requested_date < today:
-        endpoint = 'history.json'
-    else:
-        endpoint = 'forecast.json'
+# Get user requests history
+def get_history_text(user_id, limit=10):
+    cursor.execute("""
+        SELECT * FROM telegram_logs
+        WHERE user_id = %s
+        ORDER BY timestamp DESC
+        LIMIT %s
+    """, (user_id, limit))
+    rows = cursor.fetchall()
+    history_lines = []
+    for row in rows:
+        command = row[1]
+        generated_request = row[3]
+        timestamp = row[4]
 
-    url = f'https://api.weatherapi.com/v1/{endpoint}?key={api_key}&q={city}&dt={date_str}'
+        formatted_time = timestamp.strftime("%Y-%m-%d %H:%M")
+        history_lines.append(f"Command `{command}` generated `{generated_request}` at {formatted_time}")
+    return "\n".join(history_lines) if history_lines else "No history found."
 
-    response = requests.get(url)
-    data = response.json()
-    day_data = data['forecast']['forecastday'][0]['day']
-    
-    max_temp = day_data['maxtemp_c']
-    min_temp = day_data['mintemp_c']
-    avg_temp = day_data['avgtemp_c']
+# DB logging
+def log_to_db(user_id, command, args, response_text):
+    cursor.execute("""
+        INSERT INTO telegram_logs (user_id, command, args, response_text, timestamp)
+        VALUES (%s, %s, %s, %s, %s)
+    """, (
+        user_id,
+        command,
+        ' '.join(args) if args else '',
+        response_text,
+        datetime.now()
+    ))
+    conn.commit()
 
-    weather_data = {
-            "status": "success",
-            "text": (
-                f"The weather in {city} on {date_str} had a max temp of {max_temp}°C, "
-                f"min temp of {min_temp}°C, and an average of {avg_temp}°C."
-            )
-        }
-    return jsonify(weather_data), 200
+# Main Bot Logic
+def main():
+    offset = None
+    while True:
+        updates = get_updates(offset)
+        for update in updates.get('result', []):
+            message = update.get('message')
+            if not message:
+                continue
 
-@app.route('/api/history', methods=['GET'])
-def history():
-    history_data = {
-        "status": "success",
-        "text" : "today 10pm"
-    }
-    return jsonify(history_data), 200
+            chat_id = message['chat']['id']
+            text = message.get('text', '')
+            user_id = message['from'].get('id')
+            parts = text.strip().split()
 
-@app.route('/api/update_bot', methods=['GET'])
-def update_bot():
-    update_data = {
-        "status": "success",
-        "text" : "Bot updated"
-    }
-    return jsonify(update_data), 200
+            if not parts:
+                send_message(chat_id, "Empty message received.")
+                offset = update['update_id'] + 1
+                continue
 
-@app.route('/api/bot_info', methods=['GET'])
-def bot_info():
-    bot_info_data = {
-        "status": "success",
-        "text" : "This is weather app by DM, version 1.0"
-    }
-    return jsonify(bot_info_data), 200
+            command = parts[0]
+            args = parts[1:]
+            generated_request = ''
+            response_text = ''
 
-@app.route('/api/<path:any_path>', methods=['GET'])
-def catch_all(any_path):
-    bot_info_data = {
-        "status": "success",
-        "text": "Here are the valid commands you can use:\n\n- /check_weather — Get the latest weather updates for your location or any city you specify.\n- /bot_info — Learn more about this bot, including its features and capabilities.\n- /update_bot — Initiate an update to ensure the bot is running with the latest improvements and fixes.\n- /history — View your past interactions and command usage with the bot for easy reference."
-    }
-    return jsonify(bot_info_data), 200
+            # --- Handle commands ---
+            if command == '/check_weather':
+                if len(args) < 2:
+                    response_text = "Please provide both city and date. Example: /check_weather London 2025-08-01"
+                else:
+                    city, date = args[0], args[1]
+                    generated_request = f'/check_weather?city={city}&date={date}'
+                    response_text = check_weather_logic(city, date)
+            elif command == '/history':
+                if len(args) < 1:
+                    response_text = "Please provide limit number. Example: /history 5"
+                else:
+                    try:
+                        limit = int(args[0])
+                        if limit > 10 or limit <= 0:
+                            response_text = "Please provide a valid number. The maximum allowed is 10."
+                        else:
+                            generated_request = '/history'
+                            response_text = get_history_text(user_id, limit)
+                    except ValueError:
+                        response_text = "Invalid number format. Please provide a valid integer limit (max 10)."
+            elif command == '/bot_info':
+                generated_request = '/bot_info'
+                response_text = "This is weather app by DM, version 1.0"
+            elif command == '/update_bot':
+                generated_request = '/update_bot'
+                response_text = "Bot updated"
+            else:
+                response_text = (
+                    "Here are the valid commands you can use:\n\n"
+                    "- /check_weather <city> <YYYY-MM-DD> - to get the weather for a specific city at a specific time\n"
+                    "- /bot_info - to get information about bot\n"
+                    "- /update_bot - to update bot version\n"
+                    "- /history <number> - to get history of requests"
+                )
+
+            send_message(chat_id, response_text)
+            log_to_db(user_id, command, args, response_text)
+            offset = update['update_id'] + 1
+
+        time.sleep(1)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    main()
