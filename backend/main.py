@@ -3,17 +3,24 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackCo
 import psycopg2
 from datetime import datetime, timedelta
 import requests
+import os
 
 # Bot configuration
 TOKEN = ''  # Bot Token
 WEATHER_API_KEY = ''
 
+postgres_username = os.getenv('TG_POSTGRES_USERNAME')
+postgres_password = os.getenv('TG_POSTGRES_PASSWORD')
+postgres_db = os.getenv('TG_POSTGRES_DB')
+postgres_host = os.getenv('TG_POSTGRES_HOST')
+postgres_port = os.getenv('TG_POSTGRES_PORT')
+
 # PostgreSQL setup
 conn = psycopg2.connect(
-    dbname='test',
+    dbname='postgres',
     user='root',
     password='root',
-    host='localhost',
+    host='my-postgres',
     port=5432
 )
 cursor = conn.cursor()
