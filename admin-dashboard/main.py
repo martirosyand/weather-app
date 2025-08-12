@@ -4,15 +4,17 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 import os
 
 app = Flask(__name__)
-app.secret_key = "supersecretkey"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY")
 
 # PostgreSQL credentials from environment variables
 postgres_username = os.getenv('TG_POSTGRES_USERNAME')
 postgres_password = os.getenv('TG_POSTGRES_PASSWORD')
 postgres_db = os.getenv('TG_POSTGRES_DB')
+postgres_host = os.getenv('TG_POSTGRES_HOST')
+postgres_port = os.getenv('TG_POSTGRES_PORT')
 
 # PostgreSQL connection
-app.config["SQLALCHEMY_DATABASE_URI"] = f"postgresql://{postgres_username}:{postgres_password}@localhost:5432/{postgres_db}"
+app.config["SQLALCHEMY_DATABASE_URI"] = f"postgresql://{postgres_username}:{postgres_password}@{postgres_host}:{postgres_port}/{postgres_db}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
@@ -34,6 +36,10 @@ class TelegramUser(db.Model):
     __tablename__ = 'telegram_users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String, nullable=False)
+
+@app.route("/")
+def index():
+    return redirect(url_for("login"))
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -70,4 +76,4 @@ def delete_user(id):
     return redirect(url_for("dashboard"))
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, host="0.0.0.0", port=5000)
