@@ -14,8 +14,14 @@ postgres_host = os.getenv('TG_POSTGRES_HOST')
 postgres_port = os.getenv('TG_POSTGRES_PORT')
 
 # PostgreSQL connection
-app.config["SQLALCHEMY_DATABASE_URI"] = f"postgresql://{postgres_username}:{postgres_password}@{postgres_host}:{postgres_port}/{postgres_db}"
+app.config["SQLALCHEMY_DATABASE_URI"] = (
+    f"postgresql://{postgres_username}:{postgres_password}@{postgres_host}:{postgres_port}/{postgres_db}"
+)
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_pre_ping": True,
+    "pool_recycle": 300,
+}
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
@@ -75,5 +81,14 @@ def delete_user(id):
     db.session.commit()
     return redirect(url_for("dashboard"))
 
+@app.route("/healthz")
+def healthz():
+    try:
+        # Try a simple DB query to check connection
+        db.session.execute("SELECT 1")
+        return "OK", 200
+    except Exception as e:
+        return f"Database error: {e}", 500
+
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=80)

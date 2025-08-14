@@ -4,10 +4,13 @@ import psycopg2
 from datetime import datetime, timedelta
 import requests
 import os
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
 
 # Bot configuration
-TOKEN = ''  # Bot Token
-WEATHER_API_KEY = ''
+TOKEN = os.getenv('TG_BOT_TOKEN')  # Bot Token
+WEATHER_API_KEY = os.getenv('WEATHER_API_KEY')  # Weather API Key
 
 postgres_username = os.getenv('TG_POSTGRES_USERNAME')
 postgres_password = os.getenv('TG_POSTGRES_PASSWORD')
@@ -15,15 +18,48 @@ postgres_db = os.getenv('TG_POSTGRES_DB')
 postgres_host = os.getenv('TG_POSTGRES_HOST')
 postgres_port = os.getenv('TG_POSTGRES_PORT')
 
-# PostgreSQL setup
-conn = psycopg2.connect(
-    dbname='postgres',
-    user='root',
-    password='root',
-    host='my-postgres',
-    port=5432
-)
+# Function to connect to PostgreSQL database with retry logic
+def connect_to_db():
+    while True:
+        try:
+            # PostgreSQL setup
+            conn = psycopg2.connect(
+                dbname=postgres_db,
+                user=postgres_username,
+                password=postgres_password,
+                host=postgres_host,
+                port=postgres_port
+            )
+            print("✅ Connected to the database.")
+            return conn
+        except psycopg2.OperationalError as e:
+            print(f"❌ Database not ready: {e}")
+            time.sleep(5)  # wait before retrying
+
+conn = connect_to_db()
 cursor = conn.cursor()
+
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/healthz":
+            try:
+                cursor.execute("SELECT 1")  # check DB connection
+                conn.commit()
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"OK")
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(f"DB Error: {e}".encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def run_health_server():
+    server = HTTPServer(('0.0.0.0', 8080), HealthHandler)
+    server.serve_forever()
 
 def is_user_authorized(username):
     cursor.execute("SELECT * FROM telegram_users WHERE username = %s", (username,))
@@ -145,8 +181,10 @@ async def unknown(update: Update, context: CallbackContext):
 
 # === Main function ===
 def main():
+    # Start health check HTTP server in background thread
+    threading.Thread(target=run_health_server, daemon=True).start()
+    
     application = Application.builder().token(TOKEN).build()
-
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("check_weather", check_weather))
     application.add_handler(CommandHandler("history", history))
