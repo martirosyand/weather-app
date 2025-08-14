@@ -1,6 +1,7 @@
 from flask import Flask, render_template, redirect, request, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user
+from sqlalchemy import text
 import os
 
 app = Flask(__name__)
@@ -84,11 +85,13 @@ def delete_user(id):
 @app.route("/healthz")
 def healthz():
     try:
-        # Try a simple DB query to check connection
-        db.session.execute("SELECT 1")
+        # Use a fresh connection and wrap query in text()
+        with db.engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
         return "OK", 200
     except Exception as e:
-        return f"Database error: {e}", 500
+        app.logger.error(f"Health check failed: {e}")
+        return f"Database error: {str(e)}", 500
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=80)
