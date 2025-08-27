@@ -1,0 +1,35 @@
+name: Build and Push Docker Images
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-push:
+    name: Build & Push Docker Images to Docker Hub
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      - name: Build & Push Admin Dashboard
+        run: |
+          docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/dm-weather-admin-dash:latest ./admin-dashboard
+          docker push ${{ secrets.DOCKER_HUB_USERNAME }}/dm-weather-admin-dash:latest
+
+      - name: Build & Push Backend Service
+        run: |
+          docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/dm-weather-backend:latest ./backend
+          docker push ${{ secrets.DOCKER_HUB_USERNAME }}/dm-weather-backend:latest
+
+      - name: Build & Push Database Service
+        run: |
+          docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/dm-weather-database:latest ./database
+          docker push ${{ secrets.DOCKER_HUB_USERNAME }}/dm-weather-database:latest
